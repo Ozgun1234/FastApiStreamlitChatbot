@@ -1,0 +1,29 @@
+# Python cache klasörleri
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Sanal ortamlar
+.venv/
+venv/
+
+# Model çıktıları veya veriler
+storage/processed/
+*.jpg
+*.png
+
+# Git dosyaları
+.git/
+.gitignore
+
+# VSCode veya IDE dosyaları
+.vscode/
+*.swp
+
+# Test dosyaları
+test_*.http
+
+# Diğer log/temp dosyalar
+*.log
+*.tmp

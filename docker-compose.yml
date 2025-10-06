@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  streamlit-ui:
+    image: my_chat_ui_frontend:latest
+    container_name: ucanble_container_3_frontend
+    ports:
+      - "8501:8501"
+    networks:
+      - ucanble_hub_compose_ai-model-net
+    volumes:
+      - ucanble_hub_compose_processed-images:/app/storage
+    environment:
+      - BACKEND_API_URL=http://nginx/api/ai-ui-proxy/ucanble_container_3_backend/chat
+
+  backend-api:
+    image: my_chatbot_ui_backend:latest
+    container_name: ucanble_container_3_backend
+    ports:
+      - "8061:8002"
+    networks:
+      - ucanble_hub_compose_ai-model-net
+    volumes:
+      - ucanble_hub_compose_processed-images:/app/storage
+
+networks:
+  ucanble_hub_compose_ai-model-net:
+    external: true
+
+volumes:
+  ucanble_hub_compose_processed-images:
+    external: true   # ✅ daha önce "docker volume create ..." ile oluşturulmuş olmalı
