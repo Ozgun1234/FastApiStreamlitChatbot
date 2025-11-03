@@ -2,31 +2,35 @@ version: "3.9"
 
 services:
   streamlit-ui:
-    image: my_chat_ui_frontend:latest
-    container_name: ucanble_container_3_frontend
-    ports:
-      - "8501:8501"
+    image: ghcr.io/ozgun1234/fastapichatbotfrontend:fileupload
+    container_name: ucanble_container_90_frontend
+    expose:
+      - "8501"
     networks:
-      - ucanble_hub_compose_ai-model-net
+      - ucanblehub_uh-network
     volumes:
-      - ucanble_hub_compose_processed-images:/app/storage
+      - ucanblehub_processed-images:/app/storage
     environment:
-      - BACKEND_API_URL=http://nginx/api/ai-ui-proxy/ucanble_container_3_backend/chat
+      BACKEND_URL: https://zone.ucanblehub.com/api/ai-ui-proxy/ucanble_container_90_backend
+      STREAMLIT_SERVER_PORT: 8501
+      STREAMLIT_SERVER_HEADLESS: true
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: false
 
   backend-api:
-    image: my_chatbot_ui_backend:latest
-    container_name: ucanble_container_3_backend
-    ports:
-      - "8061:8002"
+    image: ghcr.io/ozgun1234/fastapichatbotbackend:fileupload
+    container_name: ucanble_container_90_backend
+    expose:
+      - "8002"
     networks:
-      - ucanble_hub_compose_ai-model-net
+      - ucanblehub_uh-network
     volumes:
-      - ucanble_hub_compose_processed-images:/app/storage
+      - ucanblehub_processed-images:/app/storage
+    command: uvicorn main:app --host 0.0.0.0 --port 8002
 
 networks:
-  ucanble_hub_compose_ai-model-net:
+  ucanblehub_uh-network:
     external: true
 
 volumes:
-  ucanble_hub_compose_processed-images:
-    external: true   # ✅ daha önce "docker volume create ..." ile oluşturulmuş olmalı
+  ucanblehub_processed-images:
+    external: true

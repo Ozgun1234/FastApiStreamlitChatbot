@@ -1,275 +1,244 @@
+# --- Minimal Chatbot with Messaging Logic ---
 import os
-import json
-import time
 import requests
 import streamlit as st
-from typing import List, Dict, Any
+from streamlit.web.server.websocket_headers import _get_websocket_headers
 
-# 🔧 Streamlit first-call rule
-st.set_page_config(page_title="Gemini Chat", layout="centered")
+st.set_page_config(page_title="Simple Chatbot", layout="wide")
 
-# WebSocket headers (Streamlit private API) – güvenli yakalama
-try:
-    from streamlit.web.server.websocket_headers import _get_websocket_headers
-    ws_headers: Dict[str, str] = _get_websocket_headers() or {}
-except Exception:
-    ws_headers = {}
+# --- State Initialization ---
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "uploaded_image" not in st.session_state:
+    st.session_state.uploaded_image = None
+if "session" not in st.session_state:
+    st.session_state.session = requests.Session()
 
-"""
-Gemini Chat – Streamlit UI (Polished)
-- Cookie & auth header'ları WebSocket üzerinden okuyup backend'e forward eder
-- Nginx/Laravel billing zincirine uyumludur
-- Non-stream ve stream modlarını destekler (text/plain chunk)
-- Chat geçmişi, system prompt, temperature ve token limiti ayarları
-- Retry, Clear Chat, transcript indirme, latency ölçümü
+# --- Backend API URL ---
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8002")
+CHAT_ENDPOINT = f"{BACKEND_URL}/chat"
 
-ENV VARS
-- BACKEND_API_URL (default: http://nginx/api/ai-ui-proxy/gemini_chat_backend/chat)
-
-Backend beklenen response formatı:
-{
-  "status": 200,
-  "message": "...assistant reply..."
-}
-"""
-
-# ---------- Config ----------
-BACKEND_API_URL = os.getenv(
-    "BACKEND_API_URL",
-    "http://localhost:8002/chat"
-)
-
-# ---------- Cookie & Header Extraction (WebSocket) ----------
-raw_cookie = ws_headers.get("Cookie", "")
-
-cookie_dict: Dict[str, str] = {}
-for kv in raw_cookie.split(";"):
-    if "=" in kv:
-        k, v = kv.strip().split("=", 1)
-        cookie_dict[k] = v
-
-USER_ID = cookie_dict.get("uc_user")
-SESSION_ID = cookie_dict.get("uc_session")
-PLAN = cookie_dict.get("uc_plan")
-BALANCE = cookie_dict.get("uc_balance")
-ACCESS_TOKEN = cookie_dict.get("access_token")
-
-# Kimlik: yumuşak uyarı
-if not USER_ID:
-    st.warning("Kimlik bilgisi (uc_user) bulunamadı. Giriş yapmadıysan bazı işlemler reddedilebilir.")
-
-# ---------- State ----------
-initial_history: List[Dict[str, str]] = [
-    {"role": "system", "content": "You are a helpful assistant that answers in short and clear sentences."}
-]
-st.session_state.history = initial_history
-if "system_prompt" not in st.session_state:
-    st.session_state.system_prompt = st.session_state.history[0]["content"]
-if "last_request_headers" not in st.session_state:
-    st.session_state.last_request_headers = {}
-if "last_request_body" not in st.session_state:
-    st.session_state.last_request_body = {}
-if "last_assistant" not in st.session_state:
-    st.session_state.last_assistant = ""
-
-# ---------- Sidebar Settings ----------
-with st.sidebar:
-    st.header("⚙️ Ayarlar")
-    model = st.selectbox("Model", ["gemini-1.5-flash", "gemini-1.5-pro"], index=0)
-    temperature = st.slider("Temperature", 0.0, 2.0, 0.7, 0.1)
-    max_output_tokens = st.slider("Max Output Tokens", 64, 2048, 512, 64)
-    stream = st.toggle("Stream Mode", value=True)
-
-    st.divider()
-    st.subheader("🧠 System Prompt")
-    new_sys = st.text_area("", value=st.session_state.system_prompt, height=100)
-    col_sp1, col_sp2 = st.columns(2)
-    if col_sp1.button("System prompt'u uygula"):
-        st.session_state.system_prompt = new_sys
-        # history'deki ilk system mesajını güncelle
-        found = False
-        for m in st.session_state.history:
-            if m.get("role") == "system":
-                m["content"] = st.session_state.system_prompt
-                found = True
-                break
-        if not found:
-            st.session_state.history.insert(0, {"role": "system", "content": st.session_state.system_prompt})
-        st.toast("System prompt güncellendi.")
-    if col_sp2.button("Clear chat"):
-        st.session_state.history = [{"role": "system", "content": st.session_state.system_prompt}]
-        st.session_state.last_assistant = ""
-        st.toast("Sohbet temizlendi.")
-
-    st.divider()
-    st.subheader("🔐 Kimlik Özeti")
-    st.write(f"**User**: {USER_ID or '-'}")
-    st.write(f"**Plan**: {PLAN or '-'} | **Bakiye**: {BALANCE or '-'}")
-    if st.checkbox("WebSocket Headerlarını Göster"):
-        st.code(json.dumps(ws_headers, indent=2))
-    if st.checkbox("Cookie Dict Göster"):
-        st.code(json.dumps(cookie_dict, indent=2))
-
-# ---------- Title ----------
-st.title("💬 Gemini Chat")
-st.caption("Cookie forward + streaming destekli chatbot UI")
-
-# ---------- Chat Display ----------
-for msg in st.session_state.history:
-    role = msg.get("role")
-    content = msg.get("content", "")
-    if role == "user":
-        with st.chat_message("user"):
-            st.markdown(content)
-    elif role == "assistant":
-        with st.chat_message("assistant"):
-            st.markdown(content)
-    elif role == "system":
-        st.info(f"**System:** {content}")
-
-# ---------- User Input ----------
-user_input = st.chat_input("Mesajınızı yazın…")
-
-# ---------- Helpers ----------
-def build_forward_headers() -> Dict[str, str]:
-    return {
-        "X-UC-User": USER_ID or "",
-        "X-UC-Session": SESSION_ID or "",
-        "X-UC-Plan": PLAN or "",
-        "X-UC-Balance": BALANCE or "",
-        "X-Client": "streamlit-ui"
-    }
-
-
-def send_non_stream(payload: Dict[str, Any]) -> Dict[str, Any]:
-    headers = build_forward_headers()
-    cookies = {"access_token": ACCESS_TOKEN} if ACCESS_TOKEN else {}
-    t0 = time.perf_counter()
-    resp = requests.post(BACKEND_API_URL, json=payload, headers=headers, cookies=cookies, timeout=60)
-    latency_ms = int((time.perf_counter() - t0) * 1000)
-
-    st.session_state.last_request_headers = dict(resp.request.headers)
-    st.session_state.last_request_body = payload
-
+# --- Helper Functions ---
+def get_cookies_from_streamlit():
+    """Extract cookies from Streamlit headers"""
     try:
-        body = resp.json()
-    except Exception:
-        body = {"status": resp.status_code, "message": resp.text}
+        headers = _get_websocket_headers()
+        if headers and "Cookie" in headers:
+            return headers["Cookie"]
+    except:
+        pass
+    return None
 
-    body["latency_ms"] = latency_ms
-    return body
-
-
-def send_stream(payload: Dict[str, Any]) -> Dict[str, Any]:
-    headers = build_forward_headers()
-    cookies = {"access_token": ACCESS_TOKEN} if ACCESS_TOKEN else {}
-
-    t0 = time.perf_counter()
-    with requests.post(BACKEND_API_URL, json=payload, headers=headers, cookies=cookies, stream=True) as resp:
-        st.session_state.last_request_headers = dict(resp.request.headers)
-        st.session_state.last_request_body = payload
-
-        if resp.status_code != 200:
-            # Hata durumunda JSON dene, değilse plain
-            try:
-                body = resp.json()
-            except Exception:
-                body = {"status": resp.status_code, "message": resp.text}
-            body["latency_ms"] = int((time.perf_counter() - t0) * 1000)
-            return body
-
-        assistant_placeholder = st.empty()
-        collected = ""
-        # iter_lines, unicode ve satır bölmeleri için daha güvenli
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
-            collected += line
-            assistant_placeholder.markdown(collected)
-        return {"status": 200, "message": collected, "latency_ms": int((time.perf_counter() - t0) * 1000)}
-
-
-# ---------- Send & Render ----------
-if user_input:
-    st.session_state.history.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
-
-    payload = {
-        "messages": st.session_state.history,
-        "temperature": float(temperature),
-        "max_output_tokens": int(max_output_tokens),
-        "stream": bool(stream),
-        "model": model
-    }
-
-    with st.chat_message("assistant"):
-        if stream:
-            result = send_stream(payload)
+def send_message(text: str = None, image_file=None):
+    """Send message (text or image+text) to backend with cookies"""
+    try:
+        # Prepare headers with cookies
+        headers = {}
+        cookies_str = get_cookies_from_streamlit()
+        if cookies_str:
+            headers["Cookie"] = cookies_str
+        
+        if image_file:
+            # Send with image
+            image_file.seek(0)
+            
+            files = {
+                'file': (image_file.name, image_file, image_file.type)
+            }
+            
+            import json
+            prompt = text if text else "What's in this image?"
+            payload_dict = {
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_output_tokens": 2048,
+                "stream": False
+            }
+            
+            data = {'payload': json.dumps(payload_dict)}
+            
+            response = st.session_state.session.post(
+                CHAT_ENDPOINT, 
+                files=files, 
+                data=data, 
+                headers=headers,
+                timeout=60
+            )
         else:
-            with st.spinner("Yanıt hazırlanıyor…"):
-                result = send_non_stream(payload)
-            st.markdown(result.get("message", ""))
+            # Send text only
+            payload = {
+                "messages": [{"role": "user", "content": text}],
+                "temperature": 0.7,
+                "max_output_tokens": 2048,
+                "stream": False
+            }
+            response = st.session_state.session.post(
+                CHAT_ENDPOINT, 
+                json=payload, 
+                headers=headers,
+                timeout=30
+            )
+        
+        if response.status_code == 200:
+            return response.json().get("message", ""), None
+        else:
+            return None, f"Error {response.status_code}: {response.text}"
+            
+    except requests.exceptions.Timeout:
+        return None, "Request timed out. Please try again."
+    except Exception as e:
+        return None, f"Connection error: {str(e)}"
 
-    status = result.get("status", 500)
-    message = result.get("message", "")
-    latency_ms = result.get("latency_ms")
+# --- Custom CSS ---
+st.markdown("""
+<style>
+    .chat-message {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        display: flex;
+        flex-direction: column;
+    }
+    .user-message {
+        background-color: #2b313e;
+        margin-left: 20%;
+    }
+    .ai-message {
+        background-color: #1e2530;
+        margin-right: 20%;
+    }
+    .message-label {
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+        font-size: 0.9rem;
+    }
+    .message-content {
+        font-size: 1rem;
+        white-space: pre-wrap;
+    }
+    .stForm {
+        border: none;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    if status == 200 and message:
-        st.session_state.history.append({"role": "assistant", "content": message})
-        st.session_state.last_assistant = message
-        if latency_ms is not None:
-            st.caption(f"⏱️ Latency: {latency_ms} ms")
-    else:
-        st.error(f"Error {status}: {message}")
+# --- Main Chat Interface ---
+st.title("Chatbot")
 
-# ---------- Footer Tools ----------
+# Chat history display
+chat_container = st.container()
+with chat_container:
+    for msg in st.session_state.history:
+        if msg["sender"] == "You":
+            if msg["type"] == "image":
+                st.image(msg["content"], width=300)
+            else:
+                st.markdown(f"""
+                <div class="chat-message user-message">
+                    <div class="message-label">You</div>
+                    <div class="message-content">{msg["content"]}</div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="chat-message ai-message">
+                <div class="message-label">AI</div>
+                <div class="message-content">{msg["content"]}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
 st.divider()
-col1, col2, col3 = st.columns(3)
+
+# Image upload section
+col1, col2 = st.columns([3, 1])
+
 with col1:
-    if st.button("↻ Yeniden sor (son mesaj)") and st.session_state.history:
-        # Son user mesajını bul ve yeniden gönder
-        for m in reversed(st.session_state.history):
-            if m.get("role") == "user":
-                st.session_state.history = [st.session_state.history[0]] + [m]
-                st.experimental_rerun()
-        st.warning("Yeniden sorulacak bir kullanıcı mesajı bulunamadı.")
-with col2:
-    if st.session_state.last_assistant:
-        st.download_button(
-            "⬇️ Son yanıtı indir",
-            data=st.session_state.last_assistant.encode("utf-8"),
-            file_name="assistant_reply.txt",
-            mime="text/plain"
-        )
-with col3:
-    if st.button("📄 Transcript indir"):
-        transcript = "\n".join([
-            f"{m['role']}: {m['content']}" for m in st.session_state.history
-        ])
-        st.download_button(
-            label="Transcript'i indir",
-                            data=transcript.encode("utf-8"),
-                            file_name="transcript.txt",
-                            mime="text/plain",
-                            key="dl_transcript"
-                        )
+    uploaded_file = st.file_uploader(
+        "Upload an image (optional):", 
+        type=["jpg", "jpeg", "png"],
+        key="file_uploader"
+    )
 
-# ---------- Debug / Dev Panel ----------
-st.divider()
-st.subheader("🔍 Debug Panel (geliştiriciye yönelik)")
-colA, colB = st.columns(2)
-with colA:
-    st.caption("Son gönderilen request headers")
-    if st.session_state.last_request_headers:
-        st.code(json.dumps(st.session_state.last_request_headers, indent=2))
-    else:
-        st.write("—")
-with colB:
-    st.caption("Son gönderilen request body")
-    if st.session_state.last_request_body:
-        st.code(json.dumps(st.session_state.last_request_body, indent=2))
-    else:
-        st.write("—")
+if uploaded_file:
+    st.image(uploaded_file, caption="Image Preview", width=250)
+    st.session_state.uploaded_image = uploaded_file
+    
+    if st.button("Clear Image", key="clear_img_btn"):
+        st.session_state.uploaded_image = None
+        uploaded_file = None
+        st.rerun()
 
-st.caption(f"Backend: {BACKEND_API_URL}")
+# Message input form
+with st.form(key="message_form", clear_on_submit=True):
+    user_input = st.text_area(
+        "Message:", 
+        placeholder="Type a message and press Ctrl+Enter to send",
+        height=100,
+        key="text_input"
+    )
+    
+    col_btn1, col_btn2 = st.columns([5, 1])
+    
+    with col_btn1:
+        submit_button = st.form_submit_button("Send", type="primary", use_container_width=True)
+    
+    with col_btn2:
+        clear_button = st.form_submit_button("Clear", use_container_width=True)
+    
+    if clear_button:
+        st.session_state.history = []
+        st.session_state.uploaded_image = None
+        st.rerun()
+    
+    if submit_button:
+        # Check if there's content to send
+        has_text = user_input and user_input.strip()
+        has_image = st.session_state.uploaded_image is not None
+        
+        if has_text or has_image:
+            # Determine if sending with image or text only
+            if has_image:
+                # Add image to history
+                st.session_state.history.append({
+                    "type": "image", 
+                    "sender": "You", 
+                    "content": st.session_state.uploaded_image
+                })
+                
+                # Add text prompt to history
+                prompt = user_input.strip() if has_text else "What's in this image?"
+                st.session_state.history.append({
+                    "type": "text", 
+                    "sender": "You", 
+                    "content": prompt
+                })
+                
+                # Send to backend
+                with st.spinner("Processing..."):
+                    assistant_message, error = send_message(prompt, st.session_state.uploaded_image)
+                
+                # Clear uploaded image after sending
+                st.session_state.uploaded_image = None
+                
+            else:
+                # Text only
+                st.session_state.history.append({
+                    "type": "text", 
+                    "sender": "You", 
+                    "content": user_input
+                })
+                
+                with st.spinner("Thinking..."):
+                    assistant_message, error = send_message(user_input)
+            
+            # Add AI response
+            if error:
+                st.error(error)
+            elif assistant_message:
+                st.session_state.history.append({
+                    "type": "text", 
+                    "sender": "AI", 
+                    "content": assistant_message
+                })
+            
+            st.rerun()
