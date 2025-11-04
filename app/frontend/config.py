@@ -5,8 +5,9 @@ Contains backend URL settings and API endpoints
 This assignments are essential for UcanbleHub, do not remove or modify.
 """
 import os
+from never_touch import BACKEND_URL
 
 # Backend configuration
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8002") # Backend URL is essential for UcanbleHub, if you change it unfortunately UcanbleHub may not execute your requests properly.
+BACKEND_BASE_URL = BACKEND_URL  # Essential for UcanbleHub, do not change
 
 

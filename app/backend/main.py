@@ -1,29 +1,24 @@
 import logging
-logger = logging.getLogger("uvicorn.error")
 import os
-import time
 import asyncio
 from typing import List, Optional, AsyncGenerator
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field, validator
-import logging
-import base64
 
 import google.generativeai as genai
-from google.genai import types
 from google.api_core.exceptions import ResourceExhausted, DeadlineExceeded, GoogleAPIError
-from fastapi.middleware.cors import CORSMiddleware
+
+# UCANBLEHUB ESSENTIAL NEVER DELETE OR CHANGE
+from core import setup_ucanblehub_essentials
 
 # --- Config ---
-
-# --- Set Logger ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 GEMINI_MODEL_DEFAULT = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
-MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "0"))  # Disabled by default
+MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "0"))
 GENAI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyCn2dJ9QCq8ti3ehR6ewnSeVqb5J2RGMQM")
 
 logger.info(f"Using Gemini model: {GEMINI_MODEL_DEFAULT}")
@@ -37,15 +32,8 @@ genai.configure(api_key=GENAI_API_KEY)
 
 app = FastAPI(title="Gemini Chat Service")
 
-""" Ucanble hub essential do not remove or modify."""
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-""" --- Do Not Modify --- """
+# UCANBLEHUB ESSENTIAL NEVER DELETE OR CHANGE
+setup_ucanblehub_essentials(app)
 
 # --- Schemas ---
 class ChatMessage(BaseModel):
@@ -112,31 +100,13 @@ async def backoff_call(func, *args, **kwargs):
 
 # --- Safety Settings ---
 SAFETY_SETTINGS = [
-    {
-        "category": "HARM_CATEGORY_HARASSMENT",
-        "threshold": "BLOCK_NONE"
-    },
-    {
-        "category": "HARM_CATEGORY_HATE_SPEECH",
-        "threshold": "BLOCK_NONE"
-    },
-    {
-        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-        "threshold": "BLOCK_NONE"
-    },
-    {
-        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-        "threshold": "BLOCK_NONE"
-    }
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
 ]
 
 # --- Routes ---
-@app.post("/healthz")
-async def healthz():
-    return {"ok": True, "model": GEMINI_MODEL_DEFAULT}
-
-from typing import Union
-
 @app.post("/chat")
 async def chat(
     request: Request,
@@ -205,7 +175,7 @@ async def chat(
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(None, _call)
 
-            logger.info(f"Backend response received")
+            logger.info("Backend response received")
 
             text = ""
             try:
