@@ -37,14 +37,15 @@ genai.configure(api_key=GENAI_API_KEY)
 
 app = FastAPI(title="Gemini Chat Service")
 
-
+""" Ucanble hub essential do not remove or modify."""
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Production'da spesifik origin belirt
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+""" --- Do Not Modify --- """
 
 # --- Schemas ---
 class ChatMessage(BaseModel):

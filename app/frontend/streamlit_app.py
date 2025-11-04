@@ -1,8 +1,12 @@
+# app.py
 # --- Minimal Chatbot with Messaging Logic ---
-import os
 import requests
 import streamlit as st
-from streamlit.web.server.websocket_headers import _get_websocket_headers
+
+# UCANBLEHUB ESSENTIAL NEVER DELETE OR CHANGE
+from config import BACKEND_URL
+# UCANBLEHUB ESSENTIAL NEVER DELETE OR CHANGE
+from utils import send_message
 
 st.set_page_config(page_title="Simple Chatbot", layout="wide")
 
@@ -13,81 +17,6 @@ if "uploaded_image" not in st.session_state:
     st.session_state.uploaded_image = None
 if "session" not in st.session_state:
     st.session_state.session = requests.Session()
-
-# --- Backend API URL ---
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8002")
-CHAT_ENDPOINT = f"{BACKEND_URL}/chat"
-
-# --- Helper Functions ---
-def get_cookies_from_streamlit():
-    """Extract cookies from Streamlit headers"""
-    try:
-        headers = _get_websocket_headers()
-        if headers and "Cookie" in headers:
-            return headers["Cookie"]
-    except:
-        pass
-    return None
-
-def send_message(text: str = None, image_file=None):
-    """Send message (text or image+text) to backend with cookies"""
-    try:
-        # Prepare headers with cookies
-        headers = {}
-        cookies_str = get_cookies_from_streamlit()
-        if cookies_str:
-            headers["Cookie"] = cookies_str
-        
-        if image_file:
-            # Send with image
-            image_file.seek(0)
-            
-            files = {
-                'file': (image_file.name, image_file, image_file.type)
-            }
-            
-            import json
-            prompt = text if text else "What's in this image?"
-            payload_dict = {
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
-                "max_output_tokens": 2048,
-                "stream": False
-            }
-            
-            data = {'payload': json.dumps(payload_dict)}
-            
-            response = st.session_state.session.post(
-                CHAT_ENDPOINT, 
-                files=files, 
-                data=data, 
-                headers=headers,
-                timeout=60
-            )
-        else:
-            # Send text only
-            payload = {
-                "messages": [{"role": "user", "content": text}],
-                "temperature": 0.7,
-                "max_output_tokens": 2048,
-                "stream": False
-            }
-            response = st.session_state.session.post(
-                CHAT_ENDPOINT, 
-                json=payload, 
-                headers=headers,
-                timeout=30
-            )
-        
-        if response.status_code == 200:
-            return response.json().get("message", ""), None
-        else:
-            return None, f"Error {response.status_code}: {response.text}"
-            
-    except requests.exceptions.Timeout:
-        return None, "Request timed out. Please try again."
-    except Exception as e:
-        return None, f"Connection error: {str(e)}"
 
 # --- Custom CSS ---
 st.markdown("""
@@ -215,7 +144,12 @@ with st.form(key="message_form", clear_on_submit=True):
                 
                 # Send to backend
                 with st.spinner("Processing..."):
-                    assistant_message, error = send_message(prompt, st.session_state.uploaded_image)
+                    assistant_message, error = send_message(
+                        st.session_state.session, 
+                        BACKEND_URL + "/chat", 
+                        prompt, 
+                        st.session_state.uploaded_image
+                    )
                 
                 # Clear uploaded image after sending
                 st.session_state.uploaded_image = None
@@ -229,7 +163,11 @@ with st.form(key="message_form", clear_on_submit=True):
                 })
                 
                 with st.spinner("Thinking..."):
-                    assistant_message, error = send_message(user_input)
+                    assistant_message, error = send_message(
+                        st.session_state.session, 
+                        BACKEND_URL + "/chat", 
+                        user_input
+                    )
             
             # Add AI response
             if error:
