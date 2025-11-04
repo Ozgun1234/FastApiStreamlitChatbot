@@ -36,6 +36,21 @@ if st.button("Test Backend", type="primary"):
             st.session_state.response = message
             st.success("Message sent successfully!")
 
+if st.button("Upload Test PDF", type="primary"):
+    with st.spinner("Uploading test PDF..."):
+        message, error = send_message(
+            st.session_state.session, 
+            "upload_pdf",
+            None  # No message needed for PDF upload in this mock
+        )
+        
+        if error:
+            st.error(f"Error: {error}")
+            st.session_state.response = None
+        else:
+            st.session_state.response = message
+            st.success("PDF uploaded successfully!")
+
 if st.session_state.response:
     st.divider()
     st.subheader("Backend Response:")
