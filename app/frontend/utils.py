@@ -22,6 +22,7 @@ def send_message(session, endpoint: str, text: str):
             "messages": [{"role": "user", "content": text}],
         }
         
+        print(f"Sending request to {BACKEND_BASE_URL}/{endpoint} with payload: {payload} and headers: {headers}")
         response = session.post(
             f"{BACKEND_BASE_URL}/{endpoint}",
             json=payload, 
@@ -30,7 +31,8 @@ def send_message(session, endpoint: str, text: str):
         )
         
         if response.status_code == 200:
-            return response.json().get("message", ""), None
+            # AI cevabını döndür
+            return response.json().get("response", ""), None
         else:
             return None, f"Error {response.status_code}: {response.text}"
             
@@ -38,3 +40,4 @@ def send_message(session, endpoint: str, text: str):
         return None, "Request timed out. Please try again."
     except Exception as e:
         return None, f"Connection error: {str(e)}"
+    
