@@ -47,7 +47,12 @@ Build işleminin ardından proje kök dizininde:
 ```sh
 docker-compose up --build
 ```
+# Docker Login Ghcr.io
+docker login ghcr.io -u <github_adınız>
+password soracak access_tokeni yapıştırın.
 
+Sonrasında 
+docker push ghcr.io/ozgun1234/btk_ders:latest
 > Not: `docker-compose.yml` dosyanızın backend ve frontend servislerini doğru portlarla expose ettiğinden emin olun.
 
 ## Ortam Değişkenleri
